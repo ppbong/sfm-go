@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"sfm/internal/crypto"
+	"sfm/internal/envelope"
 	"sfm/internal/prompt"
 	"sfm/internal/repo"
 
@@ -28,8 +30,8 @@ type RecipientFile struct {
 
 type RecipientEntry struct {
 	Name string `yaml:"name,omitempty"`
-	Alg  string `yaml:"alg"`  // "rsa" or "sm2"
-	Pub  string `yaml:"pub"`  // PEM for RSA, SM2
+	Alg  string `yaml:"alg"` // "rsa" or "sm2"
+	Pub  string `yaml:"pub"` // PEM for RSA, SM2
 }
 
 var shareCmd = &cobra.Command{
@@ -55,10 +57,7 @@ Recipient public keys are read from one or more YAML file.`,
 			return err
 		}
 
-		inputPath, err := r.ResolveFileName(shareInput)
-		if err != nil {
-			return err
-		}
+		inputPath := shareInput
 
 		if _, err := os.Stat(inputPath); err != nil {
 			return fmt.Errorf("input file not found in repository: %s", shareInput)
@@ -78,11 +77,7 @@ Recipient public keys are read from one or more YAML file.`,
 			return fmt.Errorf("load key: %w", err)
 		}
 
-		recPath, err := r.ResolveRepoPath(shareContacts)
-		if err != nil {
-			return err
-		}
-
+		recPath := r.ContactsPath()
 		data, err := os.ReadFile(recPath)
 		if err != nil {
 			return fmt.Errorf("read recipients: %w", err)
@@ -94,11 +89,17 @@ Recipient public keys are read from one or more YAML file.`,
 		}
 
 		if len(rf.Recipients) == 0 {
-			return fmt.Errorf("no recipients in %s", shareContacts)
+			return fmt.Errorf("no recipient in %s", shareContacts)
 		}
 
-		recipients := []crypto.RecipientInput{}
+		contacts := strings.Split(shareContacts, ",")
+		recipients := []envelope.Recipient{}
+
 		for _, entry := range rf.Recipients {
+			if !slices.Contains(contacts, entry.Name) {
+				continue
+			}
+
 			suite := crypto.SuiteIdByName(entry.Alg)
 			if suite == 0 {
 				return fmt.Errorf("unknown alg %q for recipient %s", entry.Alg, entry.Name)
@@ -125,58 +126,45 @@ Recipient public keys are read from one or more YAML file.`,
 			}
 
 			fp, _ := crypto.Fingerprint(pub, suite)
-			algByte := byte(suite)
 
-			recipients = append(recipients, crypto.RecipientInput{
+			recipients = append(recipients, envelope.Recipient{
 				Fingerprint: fp,
 				PublicKey:   pub,
-				AlgCode:     &algByte,
+				AlgCode:     uint16(suite),
 			})
 		}
 
-		outDir := r.SharePath()
-		outputPath := ""
-		if shareOutput != "" {
-			p, err := r.ResolveRepoPath(shareOutput)
-			if err != nil {
-				return err
-			}
-
-			outputPath = p
-			outDir = filepath.Dir(p)
+		outputDir := shareOutput
+		if outputDir == "" {
+			outputDir = filepath.Dir(inputPath)
 		}
 
-		if err := os.MkdirAll(outDir, 0o700); err != nil {
+		if err := os.MkdirAll(outputDir, 0o700); err != nil {
 			return err
-		}
-
-		baseName := filepath.Base(inputPath)
-		outName := baseName + ".sfx"
-		if outputPath == "" {
-			outputPath = filepath.Join(outDir, outName)
 		}
 
 		dek := make([]byte, 32)
 		rand.Read(dek)
 
+		baseName := filepath.Base(inputPath)
 		stat, _ := os.Stat(inputPath)
-		meta := crypto.EnvelopeMeta{Name: baseName, Size: stat.Size()}
+		meta := envelope.EnvelopeMetaPlain{Name: baseName, Size: uint64(stat.Size())}
 
-		err = crypto.EncryptFile(inputPath, outputPath, dek, mySuite,
+		memo, err := envelope.EncryptFile(inputPath, outputDir, dek, mySuite,
 			recipients, myPub, mySk, myFp, meta, true, 0)
 		if err != nil {
 			return fmt.Errorf("encrypt: %w", err)
 		}
 
 		_ = r.AppendManifest(repo.FileEntry{
-			Name:      filepath.Base(outputPath),
-			Path:      outputPath,
+			Name:      filepath.Base(memo.OutputPath),
+			Path:      memo.OutputPath,
 			Kind:      "shared",
 			Size:      stat.Size(),
 			CreatedAt: time.Now(),
 		})
 
-		fmt.Printf("Shared   -> %s\n", outputPath)
+		fmt.Printf("Shared   -> %s\n", memo.OutputPath)
 		fmt.Printf("  Suite:       %s\n", crypto.SuiteName(mySuite))
 		fmt.Printf("  Recipients:  %d\n", len(recipients))
 		for i, entry := range rf.Recipients {
@@ -194,7 +182,7 @@ Recipient public keys are read from one or more YAML file.`,
 func init() {
 	shareCmd.Flags().StringVarP(&shareInput, "input", "i", "", "Input file name in the repository root (required)")
 	shareCmd.Flags().StringVarP(&shareContacts, "contact", "c", "", "Contact names with comma to separate (required)")
-	shareCmd.Flags().StringVarP(&shareOutput, "output", "o", "", "Output path inside the repository (default: shared/<name>.sfx)")
+	shareCmd.Flags().StringVarP(&shareOutput, "output", "o", "", "Output directory")
 	shareCmd.Flags().StringVar(&sharePassword, "password", "", "Password (omit to prompt)")
 	rootCmd.AddCommand(shareCmd)
 }

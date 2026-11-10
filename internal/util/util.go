@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -51,4 +52,42 @@ func CleanAndJoinStrings(items []string, sep string) (string, error) {
 	}
 
 	return strings.Join(cleaned, sep), nil
+}
+
+func IsInsideBaseDir(base, dir string) bool {
+	parent, err := filepath.Abs(base)
+	if err != nil {
+		return false
+	}
+
+	child, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func ByteArrayEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	var d byte
+	for i, ea := range a {
+		d |= ea ^ b[i]
+	}
+
+	return d == 0
+}
+
+func ByteArrayZero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }

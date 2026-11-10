@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"sfm/internal/crypto"
+	"sfm/internal/envelope"
 )
 
 func (r *Repo) LoadSalt() ([]byte, error) {
@@ -123,7 +124,7 @@ func (r *Repo) LoadCurrentPub() (crypto.Provider, crypto.PublicKeyHandle, crypto
 
 func (r *Repo) GetSalt() ([]byte, error) { return r.LoadSalt() }
 
-func (r *Repo) FindMyRecipient(recs []crypto.Recipient) (*crypto.Recipient, string, bool) {
+func (r *Repo) FindMyRecipient(recs []envelope.EnvelopeRecipient) (*envelope.EnvelopeRecipient, string, bool) {
 	if len(recs) == 0 {
 		return nil, "", false
 	}
@@ -166,23 +167,20 @@ func (r *Repo) FindMyRecipient(recs []crypto.Recipient) (*crypto.Recipient, stri
 	return nil, "", false
 }
 
-func (r *Repo) UnwrapDekForRecipients(password string, recs []crypto.Recipient, fileAlg crypto.AlgSuite) ([]byte, bool) {
+func (r *Repo) UnwrapDekForRecipients(password string, recs []envelope.EnvelopeRecipient, fileAlg crypto.AlgSuite) ([]byte, bool) {
 	rec, skPath, ok := r.FindMyRecipient(recs)
 	if !ok {
 		return nil, false
 	}
 
-	rAlg := fileAlg
-	if rec.AlgCode != nil {
-		rAlg = crypto.AlgSuite(*rec.AlgCode)
-	}
+	rAlg := crypto.SuiteProbe(rec.AlgCode, fileAlg)
 
 	provider, err := crypto.GetProvider(rAlg)
 	if err != nil {
 		return nil, false
 	}
 
-	wrapped, err := b64Decode(rec.WrappedDek)
+	wrapped, err := base64.StdEncoding.DecodeString(rec.WrappedDek)
 	if err != nil {
 		return nil, false
 	}
@@ -221,8 +219,4 @@ func tryUnwrapWithBox(provider crypto.Provider, ppk []byte, boxPath string, wrap
 	}
 
 	return dek, true
-}
-
-func b64Decode(s string) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(s)
 }

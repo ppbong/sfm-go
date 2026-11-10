@@ -2,39 +2,6 @@ package crypto
 
 import "errors"
 
-type AlgSuite byte
-
-const (
-	AlgRsaAes AlgSuite = 0x01
-	AlgSm2Sm4 AlgSuite = 0x02
-)
-
-func SuiteIdByName(name string) AlgSuite {
-	switch name {
-	case "rsa", "rsa-aes", "RSA", "1":
-		return AlgRsaAes
-	case "sm2", "sm2-sm4", "SM2", "2":
-		return AlgSm2Sm4
-	}
-
-	return 0
-}
-
-func SuiteName(id AlgSuite) string {
-	switch id {
-	case AlgRsaAes:
-		return "rsa-aes"
-	case AlgSm2Sm4:
-		return "sm2-sm4"
-	}
-
-	return "unknown"
-}
-
-func AllSuites() []AlgSuite {
-	return []AlgSuite{AlgRsaAes, AlgSm2Sm4}
-}
-
 var (
 	ErrNoMatchingKey     = errors.New("no matching key found in current or history keys")
 	ErrWrongPassword     = errors.New("wrong password: unable to decrypt private key")
